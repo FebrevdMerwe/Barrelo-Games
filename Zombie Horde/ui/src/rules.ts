@@ -48,6 +48,27 @@ export const BOSS_INTERVAL = 5;
  */
 export const MAX_ZOMBIES_PER_WAVE = 12;
 
+export type Difficulty = "beginner" | "intermediate" | "advanced";
+
+export const DEFAULT_DIFFICULTY: Difficulty = "intermediate";
+
+/**
+ * The wave the team must clear to win outright (§17, §19). In the MVP this is the *only* thing
+ * difficulty changes — every difficulty plays the same wave table and zombie stats from §10, so the
+ * curve only needs tuning once.
+ */
+export const WIN_TARGET_WAVE: Record<Difficulty, number> = {
+  beginner: 10,
+  intermediate: 20,
+  advanced: 30,
+};
+
+/** Anything that isn't a known difficulty (missing, stale, or a bad setting) falls back to the default. */
+function parseDifficulty(value: string | undefined): Difficulty {
+  if (value === "beginner" || value === "intermediate" || value === "advanced") return value;
+  return DEFAULT_DIFFICULTY;
+}
+
 export type ZombieTypeName = "Walker" | "Runner" | "Tank" | "Swarm" | "Armoured" | "Mutant" | "Boss";
 
 /** A ring a zombie can be restricted to. Restricted zombies take damage from that ring only (§7). */
@@ -148,6 +169,11 @@ export interface GameState {
   zombies: Zombie[];
   safehouseHp: number;
   maxSafehouseHp: number;
+  difficulty: Difficulty;
+  /** The wave the team must clear to win (§17, §19) — set from `difficulty`. */
+  winTargetWave: number;
+  /** True only when the win condition ended the match. False on defeat, even though both set `isComplete`. */
+  victory: boolean;
   /** Outer bull thrown this round — the horde does not move at the end of it (§12). */
   freezeArmed: boolean;
   /** The freeze was spent on the *previous* movement phase, for the banner. */
@@ -454,6 +480,9 @@ interface Horde {
   waveActive: boolean;
   round: number;
   events: string[];
+  /** Set once `wavesCleared` reaches `winTargetWave` — ends the match on the spot (§17). */
+  victory: boolean;
+  winTargetWave: number;
 }
 
 /**
@@ -509,6 +538,7 @@ function noteBoardCleared(horde: Horde): void {
   if (horde.waveActive && horde.zombies.length === 0) {
     horde.waveActive = false;
     horde.wavesCleared++;
+    if (horde.wavesCleared >= horde.winTargetWave) horde.victory = true;
   }
 }
 
@@ -624,6 +654,8 @@ export function replay(payload: ClientGamePayload): GameState {
   const playerIds = payload?.playerIds ?? [];
   const teams = buildTeams(payload);
   const seed = payload?.seed ?? 0;
+  const difficulty = parseDifficulty(payload?.options?.difficulty);
+  const winTargetWave = WIN_TARGET_WAVE[difficulty];
 
   if (teams.length === 0) {
     return {
@@ -637,6 +669,9 @@ export function replay(payload: ClientGamePayload): GameState {
       zombies: [],
       safehouseHp: SAFEHOUSE_HEALTH,
       maxSafehouseHp: SAFEHOUSE_HEALTH,
+      difficulty,
+      winTargetWave,
+      victory: false,
       freezeArmed: false,
       freezeUsed: false,
       zombiesKilled: 0,
@@ -666,6 +701,8 @@ export function replay(payload: ClientGamePayload): GameState {
     waveActive: false,
     round: 0,
     events: [],
+    victory: false,
+    winTargetWave,
   };
 
   // Round 1 opens with wave 1 already on the board, so the first survivor has something to shoot at.
@@ -686,9 +723,9 @@ export function replay(payload: ClientGamePayload): GameState {
   let dartsThrown = 0;
 
   for (const visit of visits) {
-    // Once the safehouse is down the run is over; later darts in the log (a stray detection landing
-    // after the final push) must not carry on playing it.
-    if (horde.safehouseHp <= 0) break;
+    // Once the run is over — safehouse down, or the win target already cleared — later darts in the log
+    // (a stray detection landing after the final push) must not carry on playing it.
+    if (horde.safehouseHp <= 0 || horde.victory) break;
 
     const team = teams[teamIndex];
     const thrower = team.playerIds[memberIndexByGroup[team.groupIndex]];
@@ -705,6 +742,10 @@ export function replay(payload: ClientGamePayload): GameState {
     visitPlayerId = thrower;
     currentVisitThrows = isVisitOver(visit) ? [] : visit.throws;
 
+    // Clearing the win-target wave ends the match immediately, the same way an early wave clear ends
+    // the round early (§10): the thrower's own turn finishes out normally above, but nothing moves and
+    // no further wave spawns after this (§17).
+    if (horde.victory) break;
     if (!isVisitOver(visit)) break;
 
     memberIndexByGroup[team.groupIndex] =
@@ -729,7 +770,7 @@ export function replay(payload: ClientGamePayload): GameState {
 
   markImminent(horde);
 
-  const isComplete = horde.safehouseHp <= 0;
+  const isComplete = horde.safehouseHp <= 0 || horde.victory;
   const score =
     horde.kills * SCORE_PER_KILL +
     horde.wavesCleared * SCORE_PER_WAVE +
@@ -741,8 +782,8 @@ export function replay(payload: ClientGamePayload): GameState {
   const currentTeam = teams[teamIndex];
   const currentPlayerIndex = memberIndexByGroup[currentTeam.groupIndex];
 
-  // The run always ends in defeat, and the whole team is credited with it — every player in both lists,
-  // so each member earns session-leaderboard points (§2).
+  // The run ends in victory or defeat, and either way the whole team is credited with it — every player
+  // in both lists, so each member earns session-leaderboard points (§2, §17).
   const everyone = isComplete ? [...playerIds] : [];
 
   return {
@@ -756,6 +797,9 @@ export function replay(payload: ClientGamePayload): GameState {
     zombies: horde.zombies,
     safehouseHp: horde.safehouseHp,
     maxSafehouseHp: SAFEHOUSE_HEALTH,
+    difficulty,
+    winTargetWave,
+    victory: horde.victory,
     freezeArmed: horde.freezeArmed,
     freezeUsed: horde.freezeUsed,
     zombiesKilled: horde.kills,
@@ -800,6 +844,7 @@ export function hashState(state: GameState): string {
       state.wavesCleared,
       state.zombies.map((z) => [z.id, z.health, z.space]),
       state.isComplete,
+      state.victory,
     ])
   );
 }

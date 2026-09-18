@@ -19,6 +19,7 @@ import {
   buildWave,
   hashState,
   replay,
+  type Difficulty,
   type GameState,
   type Zombie,
 } from "../ui/src/rules.ts";
@@ -43,11 +44,13 @@ class Sim {
   readonly visits: Visit[] = [];
   readonly playerCount: number;
   readonly seed: number;
+  readonly difficulty: Difficulty;
   private dartCount = 0;
 
-  constructor(playerCount: number, seed = SEED) {
+  constructor(playerCount: number, seed = SEED, difficulty: Difficulty = "intermediate") {
     this.playerCount = playerCount;
     this.seed = seed;
+    this.difficulty = difficulty;
   }
 
   payload(): ClientGamePayload {
@@ -55,7 +58,7 @@ class Sim {
     return {
       seed: this.seed,
       playerIds,
-      options: {},
+      options: { difficulty: this.difficulty },
       playerGroups: Object.fromEntries(playerIds.map((id) => [id, 0])),
       visits: this.visits,
     };
@@ -398,6 +401,7 @@ check("the run ends at 0 safehouse HP, crediting every player (§2, §9, §17)",
 
   const state = sim.state();
   assert(state.isComplete, "the safehouse should have fallen inside 60 rounds of pure misses");
+  assert(!state.victory, "a fallen safehouse must not also read as a win");
   assertEqual(state.safehouseHp, 0, "safehouse hp");
   assertEqual(state.winnerPlayerIds.length, 4, "every player is a winner");
   assertEqual(state.finalStandings.length, 4, "every player is in the standings");
@@ -411,6 +415,43 @@ check("the run ends at 0 safehouse HP, crediting every player (§2, §9, §17)",
   const hashAtEnd = hashState(state);
   sim.passRound().passRound();
   assertEqual(hashState(sim.state()), hashAtEnd, "state must be frozen once the run is over");
+});
+
+check("clearing the win-target wave ends the run in victory, crediting every player (§17, §19)", () => {
+  const sim = new Sim(2, SEED, "beginner"); // Beginner's win target is wave 10 (§19).
+
+  let guard = 0;
+  while (!sim.state().isComplete && guard++ < 500) {
+    const board = sim.state().zombies;
+    if (board.length === 0) {
+      sim.miss().miss().miss().endTurn();
+      continue;
+    }
+    for (let dart = 0; dart < 3; dart++) {
+      const live = sim.state().zombies;
+      if (live.length === 0) {
+        sim.miss();
+        continue;
+      }
+      const target = [...live].sort((a, b) => a.space - b.space || a.spawnOrder - b.spawnOrder)[0];
+      sim.dart(target.number, "Triple");
+    }
+    sim.endTurn();
+  }
+
+  const state = sim.state();
+  assert(state.isComplete, "the run should have reached the win target inside 500 rounds of aggressive play");
+  assert(state.victory, "clearing the target wave should end the run in victory, not defeat");
+  assertEqual(state.wavesCleared, state.winTargetWave, "stops the instant the target wave clears");
+  assertEqual(state.winTargetWave, 10, "beginner's target from §19/§20");
+  assert(state.safehouseHp > 0, "the safehouse should still be standing on a win");
+  assertEqual(state.winnerPlayerIds.length, 2, "every player is credited on a win too, same as a defeat");
+  assertEqual(state.finalStandings.length, 2, "every player is in the standings");
+
+  // Same freeze-on-completion guarantee as the defeat path — nothing carries on after a win either.
+  const hashAtEnd = hashState(state);
+  sim.passRound().passRound();
+  assertEqual(hashState(sim.state()), hashAtEnd, "state must be frozen once the run is won");
 });
 
 check("undo is free: shortening the log brings the zombie back (§2)", () => {

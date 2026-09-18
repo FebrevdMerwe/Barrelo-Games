@@ -38,6 +38,7 @@ const SLOT_GAP = 10;
 const INK = "#e9e4d6";
 const DIM = "#9a917f";
 const ALERT = "#ff5a4a";
+const SUCCESS = "#8fd67f";
 
 const TITLE_FONT = "Impact, 'Arial Black', 'Segoe UI', sans-serif";
 const UI_FONT = "'Consolas', 'SF Mono', monospace";
@@ -102,6 +103,7 @@ interface SoundMarker {
   safehouseHp: number;
   wave: number;
   isComplete: boolean;
+  victory: boolean;
 }
 
 export class BoardScene extends Phaser.Scene {
@@ -235,6 +237,7 @@ export class BoardScene extends Phaser.Scene {
       safehouseHp: state.safehouseHp,
       wave: state.wave,
       isComplete: state.isComplete,
+      victory: state.victory,
     };
 
     // Sound is driven by the *difference* between two rendered states, never by the fold. A refresh
@@ -244,7 +247,7 @@ export class BoardScene extends Phaser.Scene {
     if (state.dartsThrown > previous.darts) this.playDartSound(state);
     if (state.safehouseHp < previous.safehouseHp) this.delayedSfx("breach", 220);
     if (state.wave > previous.wave) this.delayedSfx("wave", 420);
-    if (state.isComplete && !previous.isComplete) this.delayedSfx("gameOver", 700);
+    if (state.isComplete && !previous.isComplete) this.delayedSfx(state.victory ? "victory" : "gameOver", 700);
   }
 
   private delayedSfx(name: SfxName, delay: number): void {
@@ -328,7 +331,7 @@ export class BoardScene extends Phaser.Scene {
       .setPosition(width / 2, mid);
     this.scoreText.setText(state.score.toLocaleString("en-US")).setPosition(width - 20, mid - 10);
     this.killsText
-      .setText(`${state.zombiesKilled} KILLED  ·  ${state.wavesCleared} WAVES CLEARED`)
+      .setText(`${state.zombiesKilled} KILLED  ·  ${state.wavesCleared} / ${state.winTargetWave} WAVES CLEARED`)
       .setPosition(width - 20, mid + 18);
   }
 
@@ -712,7 +715,7 @@ export class BoardScene extends Phaser.Scene {
     panel
       .fillStyle(0x16110f, 0.98)
       .fillRoundedRect(-panelW / 2, -panelH / 2, panelW, panelH, 14)
-      .lineStyle(3, 0x7a2b26, 1)
+      .lineStyle(3, state.victory ? 0x2f6b3a : 0x7a2b26, 1)
       .strokeRoundedRect(-panelW / 2, -panelH / 2, panelW, panelH, 14);
 
     const survivors = (state.teams[0]?.playerIds ?? [])
@@ -720,10 +723,10 @@ export class BoardScene extends Phaser.Scene {
       .join(" · ");
 
     const heading = this.add
-      .text(0, -panelH / 2 + 52, "SAFEHOUSE DESTROYED", {
+      .text(0, -panelH / 2 + 52, state.victory ? "SAFEHOUSE HELD" : "SAFEHOUSE DESTROYED", {
         fontFamily: TITLE_FONT,
         fontSize: "40px",
-        color: ALERT,
+        color: state.victory ? SUCCESS : ALERT,
       })
       .setOrigin(0.5);
 
@@ -732,7 +735,7 @@ export class BoardScene extends Phaser.Scene {
         0,
         14,
         [
-          `WAVE                 ${state.wave}`,
+          `WAVE                 ${state.wave} OF ${state.winTargetWave}`,
           `SURVIVAL TIME        ${formatDuration(state.survivalMs)}`,
           `ZOMBIES KILLED       ${state.zombiesKilled}`,
           `WAVES CLEARED        ${state.wavesCleared}`,

@@ -13,7 +13,12 @@ requiring players to aim at virtual targets on the TV.
 
 ### Core objective
 
-> **Work together to survive as many zombie waves as possible before the safehouse is destroyed.**
+> **Work together to survive zombie waves until the safehouse falls — or until you've cleared enough of
+> them to win outright.**
+
+Every match has a real win condition: clear the target wave for the chosen difficulty (§19) and the
+safehouse holds — the team wins. Fall short and the safehouse is destroyed — the team loses. There is no
+third outcome.
 
 ### Companion documents
 
@@ -36,7 +41,14 @@ defending a single safehouse.
   "minPlayers": 2,
   "settings": [
     { "kind": "playerGroup", "key": "teams", "displayName": "Survivors",
-      "maxGroups": 1, "maxPlayersPerGroup": 6 }
+      "maxGroups": 1, "maxPlayersPerGroup": 6 },
+    { "kind": "gameMode", "key": "difficulty", "displayName": "Difficulty",
+      "defaultValue": "intermediate",
+      "choices": [
+        { "value": "beginner", "displayName": "Beginner", "options": { "difficulty": "beginner" } },
+        { "value": "intermediate", "displayName": "Intermediate", "options": { "difficulty": "intermediate" } },
+        { "value": "advanced", "displayName": "Advanced", "options": { "difficulty": "advanced" } }
+      ] }
   ]
 }
 ```
@@ -46,10 +58,14 @@ Consequences worth stating plainly, because they shape the rules:
 - **Turn order is the roster order within that one team.** Barrelo's rotation gives one visit per team per
   round; with a single team, that is exactly "each survivor throws in turn".
 - **There is no opposing side and no individual winner.** Nothing is scored per player.
-- **The match always ends in defeat** — the safehouse falls eventually. On defeat the game reports
+- **The host picks a difficulty before the match starts, and it sets the win target** — see §19. It is a
+  declared `gameMode` setting like any other, so it arrives in `payload.options.difficulty` and can never
+  change mid-match (see Determinism, below).
+- **Every match ends in victory or defeat — never a run that just trails off.** Clearing the win-target
+  wave ends it in victory; the safehouse hitting zero ends it in defeat. Either way the game reports
   **every player** in both `winnerPlayerIds` and `finalStandings`, so the whole group is credited with the
-  run and each member earns session-leaderboard points. The team survived together; they are ranked
-  together.
+  run and each member earns session-leaderboard points. The team survived together, or fell together; they
+  are ranked together regardless of which. See §17 for the two end screens.
 - **Solo is not offered.** `minPlayers: 2` — the game is built around players talking to each other about
   which zombie to take.
 
@@ -302,10 +318,16 @@ When a zombie reaches it:
 
 The zombie is removed after attacking.
 
-### Game Over
+### Game Over and Victory
 
-The game ends when safehouse HP reaches **0**. The whole team loses — and, per §2, the whole team is still
-reported to Barrelo as the run's participants, so everyone is credited.
+The game ends the instant either of two things happens:
+
+- **Safehouse HP reaches 0.** The whole team loses.
+- **The team clears the win-target wave for the chosen difficulty (§19).** The whole team wins, and the
+  safehouse's remaining HP is whatever it happened to be — a win doesn't require a full-health safehouse.
+
+Either way, per §2, the whole team is still reported to Barrelo as the run's participants, so everyone is
+credited. See §17 for what each end screen shows.
 
 ---
 
@@ -470,7 +492,9 @@ is **which number to throw**, not which zombie to pick. That is the intended sha
 
 ## 17. Game End
 
-When the safehouse reaches zero health:
+The run ends the moment either §9 condition is met, and shows one of two screens.
+
+### Defeat — the safehouse reaches zero health
 
 ```text
 💀 SAFEHOUSE DESTROYED 💀
@@ -487,12 +511,32 @@ TEAM SCORE
 12,450
 ```
 
+### Victory — the team clears the win-target wave
+
+```text
+🏠 SAFEHOUSE HELD 🏠
+
+WAVE 10 OF 10 — BEGINNER CLEARED
+
+SURVIVAL TIME
+18:52
+
+ZOMBIES KILLED
+201
+
+TEAM SCORE
+6,850
+```
+
 **Survival time is derived from the log** — `detectedAtUtc` of the last dart minus the first — never from a
 running clock (§2).
 
-There is no victory condition: the run ends when the safehouse falls, and the goal is to beat the team's
-previous best. Leaderboard metrics: highest wave, longest survival time, zombies killed, highest team
-score.
+There is always a win condition: clear the win-target wave for the difficulty the host picked (§19) and the
+run ends in victory instead of defeat. Nothing else changes about how the run is scored or credited — the
+same score formula (§15) and the same "every player is a winner" crediting (§2) apply either way. A team
+that wins can still chase a better score, a faster clear, or the next difficulty up; a team that loses can
+still aim to beat their previous best. Leaderboard metrics: highest wave, longest survival time, zombies
+killed, highest team score.
 
 ---
 
@@ -514,15 +558,31 @@ complete and played.
 
 ## 19. Difficulty
 
-Difficulty scales through: zombie count, zombie health, movement speed, zombie types, spawn frequency,
-boss difficulty, and later special events.
+The host picks one of three difficulties before the match starts, declared as the `difficulty` setting in
+§2. In the MVP, difficulty changes exactly one thing: **the wave the team must clear to win (§17)**. Every
+difficulty spawns the identical wave table and zombie stats from §10 — the curve itself doesn't change, so
+it only needs tuning once, and playtesting a harder difficulty doesn't risk breaking an easier one.
 
-It deliberately does **not** scale with player count. A 6-player group gets three times the darts of a
-2-player group against the same wave, and that is the reward for filling the roster. If playtesting shows
-big groups trivialising early waves, the lever to reach for is wave size as a function of player count —
-but add it only once the base curve is right, since it makes every wave table conditional.
+| Difficulty | Win-target wave |
+|---|---:|
+| Beginner | 10 |
+| Intermediate | 20 |
+| Advanced | 30 |
 
-The game should remain playable by beginners while giving experienced players something to reach for.
+A shorter target isn't a shorter or gentler game moment-to-moment — waves 1–10 are exactly as hard on
+Beginner as they are on the way to wave 30 on Advanced. It's a shorter **goal**: a new group can have a
+real win, with a real end screen, inside a session that fits a game night, while an experienced group aims
+for a longer, harder clear. Once the wave curve itself has been playtested, difficulty is the natural place
+to also scale zombie count, health, movement speed, spawn frequency and boss difficulty (§18) — but that is
+deliberately out of scope for the MVP, which ships with the win-target-only version above.
+
+Difficulty deliberately does **not** scale with player count. A 6-player group gets three times the darts
+of a 2-player group against the same wave, and that is the reward for filling the roster. If playtesting
+shows big groups trivialising early waves, the lever to reach for is wave size as a function of player
+count — but add it only once the base curve is right, since it makes every wave table conditional.
+
+The game should remain playable by beginners while giving experienced players something to reach for —
+which is now also the answer to "which difficulty should I pick".
 
 ---
 
@@ -549,6 +609,7 @@ setting (§2) — none can change mid-match.
 | Bull (50) Critical Hit | 5 damage | §12 |
 | Outer bull (25) Freeze | 1 movement phase | §12 |
 | Score per kill / wave / HP left | 10 / 100 / 50 | §15 |
+| Win-target wave (Beginner / Intermediate / Advanced) | 10 / 20 / 30 | §17, §19 |
 
 ---
 
@@ -562,11 +623,12 @@ The first playable version should intentionally be small.
 - Dart detection through Barrelo, standard segment/ring detection
 - Zombie spawning, health, number-based weaknesses, movement
 - The targeting rule in §6, including overkill carry
-- Safehouse health and the game-over condition
+- Safehouse health, the game-over condition, and the win condition (§9, §17)
+- The `difficulty` setting from §2/§19, with its three win targets — win-target-only, not curve scaling
 - Waves 1–4 from the table in §10, then a simple generated continuation
-- Basic TV UI: whose turn, zombie health, zombie distance, safehouse HP, wave number
+- Basic TV UI: whose turn, zombie health, zombie distance, safehouse HP, wave number, win target
 - The score in §15
-- Basic sound effects
+- Basic sound effects, including a distinct victory sting
 
 ### Initial zombie types
 
@@ -639,6 +701,8 @@ Nothing is left to move — a no-op, since there's nothing left on the board.
 Spawns immediately, and it's Player 3's turn to open it. The Runner is at space 6 with movement 2, so it
 lands on the safehouse in three rounds unless someone takes it down.
 
-The group continues until the safehouse is eventually destroyed. Their goal is now:
+The group continues, wave after wave, toward whatever win-target their difficulty set (§19) — Intermediate
+by default, wave 20. Get there before the safehouse falls and the run ends in victory (§17); fall short and
+it ends in defeat. Either way, their goal on the next run is:
 
-> **Beat their previous highest wave.**
+> **Beat their previous highest wave — or clear it outright.**

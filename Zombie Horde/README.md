@@ -73,7 +73,14 @@ which is the authority on this; the summary here is just what it means for the c
   "minPlayers": 2,
   "settings": [
     { "kind": "playerGroup", "key": "teams", "displayName": "Survivors",
-      "maxGroups": 1, "maxPlayersPerGroup": 6 }
+      "maxGroups": 1, "maxPlayersPerGroup": 6 },
+    { "kind": "gameMode", "key": "difficulty", "displayName": "Difficulty",
+      "defaultValue": "intermediate",
+      "choices": [
+        { "value": "beginner", "displayName": "Beginner", "options": { "difficulty": "beginner" } },
+        { "value": "intermediate", "displayName": "Intermediate", "options": { "difficulty": "intermediate" } },
+        { "value": "advanced", "displayName": "Advanced", "options": { "difficulty": "advanced" } }
+      ] }
   ]
 }
 ```
@@ -89,9 +96,10 @@ Two consequences for the code:
   That boundary is the one your fold has to detect, and it is the reason wave difficulty doesn't depend on
   how many people are playing (Game Scope §3, §10).
 
-`winnerPlayerIds` and `finalStandings` stay lists of *player* ids. Zombie Horde always ends in defeat, and
-reports **every player** in both lists, so the whole group is credited with the run and each member earns
-session-leaderboard points (Game Scope §2).
+`winnerPlayerIds` and `finalStandings` stay lists of *player* ids. Zombie Horde ends in victory (the team
+clears the win-target wave for the chosen `difficulty`) or defeat (the safehouse falls) — see Game Scope
+§17, §19 — and either way reports **every player** in both lists, so the whole group is credited with the
+run and each member earns session-leaderboard points (Game Scope §2).
 
 Deleting the `playerGroup` setting from the manifest would make the game solo-only — the host would stop
 collecting a team assignment and send an empty `playerGroups`. Keep it.

@@ -16,7 +16,8 @@ export type SfxName =
   | "miss"
   | "breach"
   | "wave"
-  | "gameOver";
+  | "gameOver"
+  | "victory";
 
 type AudioContextCtor = typeof AudioContext;
 
@@ -166,6 +167,15 @@ export function playSfx(name: SfxName): void {
         tone(ctx, 200, 0.5, { type: "sawtooth", gain: 0.13, delay: 0.32, slideTo: 130 });
         tone(ctx, 120, 1.1, { type: "sawtooth", gain: 0.15, delay: 0.7, slideTo: 55 });
         noise(ctx, 1.0, 0.12, 0.7);
+        break;
+
+      // The win target wave was cleared (§17). A rising triad rather than gameOver's falling one — the
+      // safehouse held, so this must not sound like the same defeat sting.
+      case "victory":
+        tone(ctx, 440, 0.16, { type: "triangle", gain: 0.11 });
+        tone(ctx, 660, 0.18, { type: "triangle", gain: 0.11, delay: 0.14 });
+        tone(ctx, 880, 0.36, { type: "triangle", gain: 0.12, delay: 0.28 });
+        tone(ctx, 1320, 0.5, { type: "sine", gain: 0.08, delay: 0.28 });
         break;
     }
   } catch {
