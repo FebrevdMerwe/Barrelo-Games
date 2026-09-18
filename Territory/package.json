@@ -1,0 +1,14 @@
+{
+  "name": "territory",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Barrelo game: control the dartboard by claiming, shielding and capturing territory.",
+  "scripts": {
+    "dev": "npm run dev --prefix ui",
+    "build": "npm run build --prefix ui",
+    "test": "npm run test --prefix ui",
+    "typecheck": "npm run typecheck --prefix ui",
+    "deploy": "node scripts/deploy.mjs"
+  }
+}

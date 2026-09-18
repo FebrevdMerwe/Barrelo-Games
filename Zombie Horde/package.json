@@ -1,0 +1,13 @@
+{
+  "name": "zombie-horde",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Co-op zombie survival for Barrelo — a client-owned game with a Phaser 4 board.",
+  "scripts": {
+    "dev": "npm run dev --prefix ui",
+    "build": "npm run build --prefix ui",
+    "check": "node dev/rules-check.ts",
+    "deploy": "node scripts/deploy.mjs"
+  }
+}

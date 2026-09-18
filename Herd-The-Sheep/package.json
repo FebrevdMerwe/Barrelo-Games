@@ -1,0 +1,13 @@
+{
+  "name": "herd-the-sheep",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Barrelo client-owned game: herd a flock of sheep into a pen using darts as scare points.",
+  "scripts": {
+    "dev": "npm run dev --prefix ui",
+    "build": "npm run build --prefix ui",
+    "deploy": "node scripts/deploy.mjs",
+    "probe": "node scripts/probe.mjs"
+  }
+}

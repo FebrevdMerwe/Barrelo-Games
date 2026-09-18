@@ -1,0 +1,15 @@
+{
+  "name": "dart-pool",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "8-ball pool played with darts — a client-owned Barrelo game.",
+  "scripts": {
+    "dev": "npm run dev --prefix ui",
+    "build": "npm run build --prefix ui",
+    "test": "npm run test --prefix ui",
+    "typecheck": "npm run typecheck --prefix ui",
+    "validate-physics": "npm run validate-physics --prefix ui",
+    "verify": "npm run verify --prefix ui"
+  }
+}

@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Territory — game harness</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; display: grid; grid-template-columns: 320px 1fr; height: 100vh;
+        font-family: system-ui, sans-serif; background: #14110e; color: #e9e4d6;
+      }
+      aside { padding: 1rem; overflow-y: auto; border-right: 1px solid #3a332a; }
+      h1 { font-size: 1rem; margin: 0 0 .25rem; }
+      p.sub { margin: 0 0 1rem; font-size: .75rem; color: #9a917f; line-height: 1.4; }
+      h2 { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: #9a917f; margin: 1.25rem 0 .5rem; }
+      button {
+        font: inherit; font-size: .8rem; padding: .35rem .5rem; margin: 0 .25rem .25rem 0;
+        background: #2a241d; color: #e9e4d6; border: 1px solid #4a4136; border-radius: 4px; cursor: pointer;
+      }
+      button:hover { background: #3a332a; }
+      button.wide { width: 100%; margin-bottom: .5rem; }
+      .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: .25rem; }
+      .grid button { margin: 0; padding: .35rem 0; }
+      iframe { border: 0; width: 100%; height: 100%; background: #0d0b09; }
+      pre {
+        font-size: .65rem; color: #9a917f; background: #0d0b09; padding: .5rem;
+        border-radius: 4px; max-height: 11rem; overflow: auto; margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <aside>
+      <h1>Territory — game harness</h1>
+      <p class="sub">
+        Stands in for Barrelo while you build. It keeps the visit log exactly the way the host does and
+        posts the same <code>barrelo:gameState</code> message into your board, so what you see here is
+        what you get once embedded. Messages your game sends back appear at the bottom. Targets the
+        game reports as dead — nothing the side at the board owns or touches — are greyed out here,
+        the same way Barrelo greys them on its own dartboard.
+      </p>
+
+      <h2>Throw</h2>
+      <div class="grid" id="segments"></div>
+      <button id="bull">Bull (D25)</button>
+      <button id="outerBull">25 (S25)</button>
+      <button id="miss">Miss</button>
+
+      <h2>Multiplier</h2>
+      <button id="ringSingle">Single</button>
+      <button id="ringTriple">Triple</button>
+      <button id="ringDouble">Double</button>
+      <p class="sub" id="ringLabel" style="margin-top:.5rem">Current: OuterSingle</p>
+
+      <h2>Turn</h2>
+      <button class="wide" id="endTurn">End turn</button>
+      <button class="wide" id="undo">Undo</button>
+      <button class="wide" id="reset">Reset match</button>
+
+      <h2>Roster</h2>
+      <button class="wide" id="cycleRoster">Next roster</button>
+      <p class="sub" id="rosterLabel" style="margin-top:.5rem"></p>
+
+      <h2>Match Length</h2>
+      <button class="wide" id="cycleMatchLength">Next match length</button>
+      <p class="sub" id="matchLengthLabel" style="margin-top:.5rem"></p>
+
+      <h2>Sent up by your game</h2>
+      <pre id="outbound">(nothing yet)</pre>
+    </aside>
+
+    <iframe id="board" src="http://localhost:5173/" title="Game board"></iframe>
+
+    <script>
+      /* The harness owns the visit log, mirroring ClientOwnedGame on the host: visits are created lazily
+         on the first dart, end-turn closes the open one, and undo either re-opens a closed visit or pops
+         the last dart. That correspondence is what makes local testing representative — keep it in step
+         if the host's rules ever change. */
+      const WEDGE_ORDER = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5];
+      const RING_RADIUS_FRACTION = { OuterSingle: 0.75, InnerSingle: 0.4, Triple: 0.605, Double: 0.976, Miss: 1.05 };
+      const RING_MULTIPLIER = { OuterSingle: 1, InnerSingle: 1, Triple: 3, Double: 2, Miss: 0 };
+
+      const PLAYER_IDS = [
+        "11111111-1111-1111-1111-111111111111",
+        "22222222-2222-2222-2222-222222222222",
+        "33333333-3333-3333-3333-333333333333",
+        "44444444-4444-4444-4444-444444444444",
+      ];
+      const PLAYER_NAMES = {
+        [PLAYER_IDS[0]]: "Alex",
+        [PLAYER_IDS[1]]: "Sam",
+        [PLAYER_IDS[2]]: "Jo",
+        [PLAYER_IDS[3]]: "Kim",
+      };
+
+      /* Barrelo's default is teams, so the harness starts there: two teams of two, interleaved in roster
+         order exactly the way the start screen submits them (Team A[0], Team B[0], Team A[1], ...). The
+         Roster button cycles the side counts Territory supports, which is what you need to check the
+         starting positions — Homes are dealt from the *number of sides*, so 2, 3 and 4 each lay the
+         board out differently. Solo is not a separate mode: it is simply one player per group. */
+      const ROSTERS = [
+        { label: "2 teams of 2 — A: Alex, Jo · B: Sam, Kim · Homes 6 / 11",
+          players: 4, groups: [0, 1, 0, 1] },
+        { label: "2 solo — Alex · Sam · Homes 6 / 11",
+          players: 2, groups: [0, 1] },
+        { label: "3 solo — Alex · Sam · Jo · Homes 4 / 3 / 14",
+          players: 3, groups: [0, 1, 2] },
+        { label: "4 solo — Alex · Sam · Jo · Kim · Homes 18 / 15 / 7 / 9",
+          players: 4, groups: [0, 1, 2, 3] },
+      ];
+
+      /* Mirrors the `matchLength` gameMode setting in plugin.json — its choices merge these same
+         options.maxRounds values into the payload, so cycling here exercises the same code path. */
+      const MATCH_LENGTHS = [
+        { label: "Unlimited", options: {} },
+        { label: "10 rounds", options: { maxRounds: "10" } },
+        { label: "15 rounds", options: { maxRounds: "15" } },
+        { label: "20 rounds", options: { maxRounds: "20" } },
+      ];
+
+      let rosterIndex = 0;
+      let matchLengthIndex = 0;
+      let visits = [];
+      let ring = "OuterSingle";
+
+      function roster() {
+        const spec = ROSTERS[rosterIndex];
+        const playerIds = PLAYER_IDS.slice(0, spec.players);
+        const playerGroups = {};
+        playerIds.forEach(function (id, i) { playerGroups[id] = spec.groups[i]; });
+        return { playerIds: playerIds, playerGroups: playerGroups, label: spec.label };
+      }
+
+      function isBull(segment, r) {
+        return segment === 25 && (r === "Single" || r === "Double");
+      }
+
+      function computePosition(segment, r) {
+        if (isBull(segment, r)) return { x: 0, y: r === "Double" ? 0 : 0.05 };
+        const index = WEDGE_ORDER.indexOf(segment);
+        const angleRad = ((index >= 0 ? index : 0) * 18 * Math.PI) / 180;
+        const fraction = RING_RADIUS_FRACTION[r] ?? 0.4;
+        return {
+          x: Math.round(Math.sin(angleRad) * fraction * 1000) / 1000,
+          y: Math.round(Math.cos(angleRad) * fraction * 1000) / 1000,
+        };
+      }
+
+      /* A complete DetectedThrow — every field the real contract has, so throws fired from here look
+         exactly like the ones Barrelo sends. */
+      function buildThrow(segment, r) {
+        return {
+          throwId: crypto.randomUUID(),
+          segment,
+          ring: r,
+          score: segment * (RING_MULTIPLIER[r] ?? 1),
+          rawNotation: r === "Miss" ? "MISS" : r + "-" + segment,
+          position: computePosition(segment, r),
+          confidence: null,
+          boardId: "harness-board",
+          cameraIndex: null,
+          detectedAtUtc: new Date().toISOString(),
+          source: "Simulator",
+        };
+      }
+
+      function throwDart(segment, r) {
+        const open = visits.length > 0 && !visits[visits.length - 1].ended;
+        if (!open) visits.push({ throws: [], ended: false });
+        visits[visits.length - 1].throws.push(buildThrow(segment, r));
+        push();
+      }
+
+      function endTurn() {
+        if (visits.length > 0 && !visits[visits.length - 1].ended) {
+          visits[visits.length - 1].ended = true;
+          push();
+        }
+      }
+
+      function undo() {
+        if (visits.length === 0) return;
+        const last = visits[visits.length - 1];
+        if (last.ended) {
+          last.ended = false;
+        } else {
+          last.throws.pop();
+          if (last.throws.length === 0) visits.pop();
+        }
+        push();
+      }
+
+      function push() {
+        document.getElementById("board").contentWindow.postMessage(
+          {
+            type: "barrelo:gameState",
+            snapshot: {
+              matchId: "00000000-0000-0000-0000-000000000000",
+              gameId: "territory",
+              status: "InProgress",
+              currentPlayerId: null,
+              legNumber: 1,
+              setNumber: 1,
+              recentThrows: visits.flatMap(function (v) { return v.throws; }).slice(-15),
+              isComplete: false,
+              winnerPlayerIds: null,
+              payload: {
+                seed: 12345,
+                playerIds: roster().playerIds,
+                options: MATCH_LENGTHS[matchLengthIndex].options,
+                playerGroups: roster().playerGroups,
+                visits: visits,
+              },
+            },
+            playerNames: PLAYER_NAMES,
+          },
+          "*"
+        );
+      }
+
+      window.addEventListener("message", function (event) {
+        const data = event.data;
+        if (!data || typeof data !== "object") return;
+        if (data.type !== "barrelo:display" && data.type !== "barrelo:matchComplete") return;
+        document.getElementById("outbound").textContent = JSON.stringify(data, null, 1);
+        if (data.type === "barrelo:display") applyDeadTargets(data.deadTargets || []);
+      });
+
+      /* Barrelo greys out the targets a game reports as dead rather than blocking them, so they stay
+         throwable here too — a dead target is still a legal dart, it just does nothing. */
+      const targetButtons = {};
+      function applyDeadTargets(dead) {
+        const deadSet = new Set(dead);
+        Object.keys(targetButtons).forEach(function (key) {
+          const isDead = deadSet.has(key === "BULL" ? "BULL" : Number(key));
+          targetButtons[key].forEach(function (button) {
+            button.style.opacity = isDead ? "0.32" : "1";
+          });
+        });
+      }
+
+      const segmentsEl = document.getElementById("segments");
+      WEDGE_ORDER.slice().sort(function (a, b) { return a - b; }).forEach(function (segment) {
+        const button = document.createElement("button");
+        button.textContent = segment;
+        button.addEventListener("click", function () { throwDart(segment, ring); });
+        segmentsEl.appendChild(button);
+        targetButtons[String(segment)] = [button];
+      });
+
+      function setRing(r) {
+        ring = r;
+        document.getElementById("ringLabel").textContent = "Current: " + r;
+      }
+      document.getElementById("ringSingle").addEventListener("click", function () { setRing("OuterSingle"); });
+      document.getElementById("ringTriple").addEventListener("click", function () { setRing("Triple"); });
+      document.getElementById("ringDouble").addEventListener("click", function () { setRing("Double"); });
+
+      document.getElementById("bull").addEventListener("click", function () { throwDart(25, "Double"); });
+      document.getElementById("outerBull").addEventListener("click", function () { throwDart(25, "Single"); });
+      targetButtons.BULL = [document.getElementById("bull"), document.getElementById("outerBull")];
+      document.getElementById("miss").addEventListener("click", function () { throwDart(0, "Miss"); });
+      document.getElementById("endTurn").addEventListener("click", endTurn);
+      document.getElementById("undo").addEventListener("click", undo);
+      document.getElementById("reset").addEventListener("click", function () { visits = []; push(); });
+
+      /* Changing roster resets the log: the visits already thrown belong to a different set of sides,
+         and replaying them against the new one would attribute darts to whoever now holds that turn. */
+      function showRoster() {
+        document.getElementById("rosterLabel").textContent = roster().label;
+      }
+      document.getElementById("cycleRoster").addEventListener("click", function () {
+        rosterIndex = (rosterIndex + 1) % ROSTERS.length;
+        visits = [];
+        showRoster();
+        push();
+      });
+
+      function showMatchLength() {
+        document.getElementById("matchLengthLabel").textContent = MATCH_LENGTHS[matchLengthIndex].label;
+      }
+      document.getElementById("cycleMatchLength").addEventListener("click", function () {
+        matchLengthIndex = (matchLengthIndex + 1) % MATCH_LENGTHS.length;
+        showMatchLength();
+        push();
+      });
+
+      showRoster();
+      showMatchLength();
+      document.getElementById("board").addEventListener("load", push);
+    </script>
+  </body>
+</html>

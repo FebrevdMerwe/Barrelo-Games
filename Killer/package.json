@@ -1,0 +1,13 @@
+{
+  "name": "killer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Killer — a Barrelo client-owned game with a Phaser 4 board.",
+  "scripts": {
+    "dev": "npm run dev --prefix ui",
+    "build": "npm run build --prefix ui",
+    "typecheck": "npm run typecheck --prefix ui",
+    "deploy": "node scripts/deploy.mjs"
+  }
+}
