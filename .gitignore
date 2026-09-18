@@ -1,5 +1,6 @@
 node_modules/
 ui/dist/
+release/
 .claude/
 *.log
 *.tsbuildinfo

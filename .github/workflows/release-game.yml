@@ -1,0 +1,76 @@
+name: Release game
+
+# Tag convention: {gameId}-v{version}, e.g. "killer-v1.3.0". gameId is read back out of the tag (not
+# guessed from the folder name, since folder names don't always match plugin.json's gameId — see
+# scripts/find-game-dir.mjs) and used to find the folder, build it, zip it, publish a GitHub Release,
+# and upsert its entry in catalog.json.
+on:
+  push:
+    tags:
+      - '*-v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install root tooling
+        run: npm ci
+
+      - name: Parse tag
+        id: tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ ! "$TAG" =~ ^(.+)-v([0-9]+\.[0-9]+\.[0-9]+.*)$ ]]; then
+            echo "Tag '$TAG' doesn't match {gameId}-v{version}" >&2
+            exit 1
+          fi
+          echo "game_id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          echo "version=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
+
+      - name: Locate game folder
+        id: dir
+        run: |
+          DIR=$(node scripts/find-game-dir.mjs "${{ steps.tag.outputs.game_id }}")
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: |
+          npm ci --prefix "${{ steps.dir.outputs.dir }}/ui"
+          npm run build --prefix "${{ steps.dir.outputs.dir }}"
+
+      - name: Package
+        id: package
+        run: |
+          ZIP=$(node scripts/package-release.mjs "${{ steps.dir.outputs.dir }}" "${{ steps.tag.outputs.version }}")
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "${{ steps.package.outputs.zip }}" \
+            --title "${{ steps.tag.outputs.game_id }} v${{ steps.tag.outputs.version }}" \
+            --notes "Automated release of ${{ steps.tag.outputs.game_id }} ${{ steps.tag.outputs.version }}."
+
+      - name: Update catalog
+        run: |
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/$(basename "${{ steps.package.outputs.zip }}")"
+          node scripts/update-catalog.mjs "${{ steps.dir.outputs.dir }}" "${{ steps.tag.outputs.version }}" "$DOWNLOAD_URL"
+
+      - name: Commit catalog.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add catalog.json
+          git diff --cached --quiet && exit 0
+          git commit -m "Update catalog: ${{ steps.tag.outputs.game_id }} v${{ steps.tag.outputs.version }}"
+          git push origin HEAD:master

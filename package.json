@@ -1,0 +1,14 @@
+{
+  "name": "barrelo-games",
+  "private": true,
+  "type": "module",
+  "description": "Monorepo of client-owned Barrelo game plugins, packaged and cataloged for install into a Barrelo host.",
+  "scripts": {
+    "catalog:find-dir": "node scripts/find-game-dir.mjs",
+    "catalog:package": "node scripts/package-release.mjs",
+    "catalog:update": "node scripts/update-catalog.mjs"
+  },
+  "devDependencies": {
+    "archiver": "^7.0.1"
+  }
+}
